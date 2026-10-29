@@ -1,0 +1,68 @@
+extends "res://tests/integration.gd"
+
+var base: String
+
+
+func _run() -> void:
+	base = "res://.local/save-library-qa/" + str(Time.get_ticks_usec())
+	set_meta("expedition_library_path", base.path_join("index.json"))
+	set_meta("expedition_worlds_dir", base.path_join("worlds"))
+	set_meta("expedition_legacy_path", base.path_join("legacy.json"))
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(base))
+	var old := {"version": 1, "seed": 37216, "stage": 1, "seals": [0], "cleared": ["guard_0_0"], "custom_note": "keep me"}
+	var legacy := base.path_join("legacy.json")
+	var file := FileAccess.open(legacy, FileAccess.WRITE)
+	var original := JSON.stringify(old)
+	file.store_string(original)
+	file.close()
+	var library := ExpeditionLibrary.read(self)
+	check(library.entries.size() == 1 and library.active_id == "legacy", "Existing single-world save is discovered as a real expedition")
+	check(FileAccess.get_file_as_string(legacy) == original, "Listing expeditions does not modify the legacy save")
+	var state := ExpeditionState.read(self)
+	check(state.seed_value == 37216 and state.stage == 1 and state.seals == [0], "V1 quest state reads with identical seed, seals and progress")
+	check(state.visited.is_empty() and state.rune == &"" and state.side_stage == 0, "New exploration and rune fields have safe migration defaults")
+	state.visited.append(-1)
+	check(state.save(), "V1 save upgrades through an atomic V2 write")
+	check(FileAccess.get_file_as_string(legacy + ".bak") == original, "Upgrade retains a byte-exact copy of the previous save")
+	var migrated: Dictionary = ExpeditionFiles.read_json(legacy)
+	check(migrated["version"] == 2 and migrated["custom_note"] == "keep me", "Schema upgrade preserves unknown user fields")
+	check(ExpeditionState.read(self).visited == [-1], "V2 discoveries load back correctly")
+	var first := library.create(117)
+	check(not first.is_empty() and library.entries.size() == 2, "Creating a seeded expedition keeps the old world")
+	var first_path := library.world_path(first)
+	check(ExpeditionState.read(self).seed_value == 117, "The new selected expedition becomes the continuation target")
+	var first_state := ExpeditionState.read(self)
+	first_state.stage = 1
+	first_state.seals = [1]
+	first_state.save()
+	var second := library.create(229)
+	check(not second.is_empty() and library.world_path(second) != first_path, "Another seed gets an independent save file")
+	check(ExpeditionState.read(self).seed_value == 229 and ExpeditionState.read(self).seals.is_empty(), "New world does not inherit another world's quest progress")
+	check(library.select(first) and ExpeditionState.read(self).seals == [1], "Returning to an earlier expedition restores its own progress")
+	check(ExpeditionLibrary.read(self).active_id == first, "Selected expedition persists across library reload")
+	check(library.world_path("../outside").is_empty() and not library.select("../../legacy"), "Index IDs cannot traverse outside the expedition directory")
+	var same_seed := library.create(117)
+	check(same_seed != first and FileAccess.file_exists(first_path), "Repeated seed can start a fresh world without overwriting the earlier playthrough")
+	var malformed := base.path_join("unknown.json")
+	file = FileAccess.open(malformed, FileAccess.WRITE)
+	var unknown := "{\"version\":777,\"payload\":\"preserve\"}"
+	file.store_string(unknown)
+	file.close()
+	check(ExpeditionFiles.write_json(malformed, {"version": 2}, [1, 2]) == ERR_INVALID_DATA and FileAccess.get_file_as_string(malformed) == unknown, "Atomic writer refuses to replace an unknown schema")
+	var before := FileAccess.get_file_as_string(first_path)
+	check(ExpeditionFiles.write_json(first_path.path_join("invalid.json"), {"version": 2}, [1, 2]) != OK and FileAccess.get_file_as_string(first_path) == before, "A failed write cannot truncate the valid destination")
+	set_meta("expedition_save_path", first_path)
+	var good := ExpeditionState.read(self)
+	good.tracked = 1
+	good.side_stage = 1
+	check(good.save() and ExpeditionState.read(self).tracked == 1, "New journal/side-quest state persists through the same checked writer")
+	check(library.create(0).is_empty() and library.create(-5).is_empty(), "Invalid seeds are rejected without creating replacement worlds")
+	var damaged := base.path_join("damaged.json")
+	file = FileAccess.open(damaged, FileAccess.WRITE)
+	var corrupt := JSON.stringify({"version": 1, "seed": 3, "stage": 1, "seals": [0, "broken"], "cleared": []})
+	file.store_string(corrupt)
+	file.close()
+	var damaged_state := ExpeditionState.load_path(damaged)
+	check(not damaged_state.write_allowed and not damaged_state.save() and FileAccess.get_file_as_string(damaged) == corrupt, "Malformed progress arrays are preserved instead of silently discarded")
+	print("RIFTERMATH_SAVE_LIBRARY_RESULT: %d checks, %d failures" % [checks, failures])
+	quit(0 if failures == 0 else 1)

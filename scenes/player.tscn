@@ -1,0 +1,50 @@
+[gd_scene load_steps=7 format=3]
+
+[ext_resource type="Script" path="res://scripts/player/player_controller.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/rifts/gesture_capture.gd" id="2"]
+[ext_resource type="Script" path="res://scripts/player/player_body.gd" id="3"]
+[ext_resource type="Script" path="res://scripts/player/parry_controller.gd" id="4"]
+
+[sub_resource type="CapsuleShape3D" id="Capsule"]
+radius = 0.28
+height = 2.35
+
+[sub_resource type="CapsuleShape3D" id="StandingClearance"]
+radius = 0.26
+height = 2.30
+
+[node name="Player" type="CharacterBody3D" groups=["player"]]
+collision_layer = 2
+collision_mask = 1
+floor_snap_length = 0.28
+floor_max_angle = 0.872665
+script = ExtResource("1")
+
+[node name="BodyShape" type="CollisionShape3D" parent="."]
+position = Vector3(0, 1.175, 0)
+shape = SubResource("Capsule")
+
+[node name="Head" type="Node3D" parent="."]
+position = Vector3(0, 2.08, 0)
+
+[node name="Camera3D" type="Camera3D" parent="Head"]
+current = true
+fov = 91.0
+near = 0.06
+far = 220.0
+
+[node name="StandingClearance" type="ShapeCast3D" parent="."]
+position = Vector3(0, 1.185, 0)
+target_position = Vector3(0, 0.02, 0)
+shape = SubResource("StandingClearance")
+collision_mask = 1
+enabled = false
+
+[node name="GestureCapture" type="Node" parent="."]
+script = ExtResource("2")
+
+[node name="BodyVisual" type="Node3D" parent="."]
+script = ExtResource("3")
+
+[node name="Parry" type="Node" parent="."]
+script = ExtResource("4")
